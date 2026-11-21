@@ -3,7 +3,6 @@ Servicio de consolidación: convierte monedas, elimina intercompany
 y calcula indicadores financieros (ROIC, ROCE, EVA).
 """
 from collections import defaultdict
-from typing import Any
 
 import pandas as pd
 
@@ -21,11 +20,29 @@ TASAS_CAMBIO = {
 }
 
 MONEDA_BASE = "GTQ"
+TOLERANCIA_INTERCOMPANY = 1.0  # GTQ
 
 
 class ErrorConsolidacion(Exception):
     """Error controlado en la consolidación."""
     pass
+
+
+# ==================== UTILIDADES ====================
+
+def _es_nulo(v) -> bool:
+    """True para None y NaN (pandas convierte None en NaN)."""
+    return v is None or (isinstance(v, float) and v != v)
+
+
+def _como_int(v):
+    """Convierte 2.0 / 2 / '2' a 2. Devuelve None si es nulo."""
+    if _es_nulo(v):
+        return None
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return None
 
 
 # ==================== CONVERSIÓN DE MONEDAS ====================
@@ -54,73 +71,86 @@ def convertir_dataframe(df: pd.DataFrame, columna_monto: str = "monto", columna_
 
 # ==================== ELIMINACIÓN INTERCOMPANY ====================
 
+def _monto_base_abs(t: dict) -> float:
+    v = t.get("monto_base")
+    if _es_nulo(v):
+        v = t.get("monto", 0)
+    return abs(round(float(v or 0), 2))
+
+
 def eliminar_intercompany(transacciones: list[dict]) -> dict:
     """
     Cruza transacciones intercompany entre empresas del grupo.
-    Compara en MONEDA BASE (monto_base) con tolerancia de 0.5 GTQ.
-    Devuelve:
-      - transacciones_limpias: sin las ventas internas duplicadas
-      - eliminadas: lista de las que se eliminaron (con su espejo)
-      - descuadres: pares que no cuadran (para reporte)
+
+    Dos transacciones forman un par si:
+      - cada una apunta a la otra como contraparte,
+      - sus montos en moneda base (valor absoluto) difieren <= 1 GTQ.
+
+    Los pares se eliminan del consolidado. Lo que no cuadra se conserva
+    y se reporta en 'descuadres'.
     """
     intercompany = [t for t in transacciones if str(t.get("es_intercompany", "N")).upper() == "S"]
     normales = [t for t in transacciones if str(t.get("es_intercompany", "N")).upper() != "S"]
 
     eliminadas = []
     descuadres = []
-    usadas = set()
+    idx_pares = set()       # índices eliminados (ambos lados del par)
+    idx_descuadre = set()   # índices que se quedan y se reportan
 
     for i, tx in enumerate(intercompany):
-        if i in usadas:
+        if i in idx_pares or i in idx_descuadre:
             continue
 
-        contraparte_id = tx.get("empresa_contraparte_id")
-        monto_base = round(float(tx.get("monto_base", tx.get("monto", 0)) or 0), 2)
+        empresa_id = _como_int(tx.get("empresa_id"))
+        contraparte_id = _como_int(tx.get("empresa_contraparte_id"))
+        monto_base = _monto_base_abs(tx)
 
         if contraparte_id is None:
+            idx_descuadre.add(i)
             descuadres.append({
                 "tipo": "SIN_CONTRAPARTE",
-                "mensaje": f"Transacción intercompany sin empresa_contraparte_id (fila {tx.get('fila_origen')})",
+                "mensaje": f"Intercompany de empresa {empresa_id} por {monto_base} GTQ sin empresa_contraparte_id",
                 "datos": tx,
             })
             continue
 
-        # Buscar el espejo comparando en MONEDA BASE
         espejo_idx = None
         for j, other in enumerate(intercompany):
-            if j <= i or j in usadas:
+            if j <= i or j in idx_pares or j in idx_descuadre:
                 continue
-            other_base = round(float(other.get("monto_base", other.get("monto", 0)) or 0), 2)
             if (
-                other.get("empresa_id") == contraparte_id
-                and abs(other_base - monto_base) < 0.5  # tolerancia 0.5 GTQ
+                _como_int(other.get("empresa_id")) == contraparte_id
+                and _como_int(other.get("empresa_contraparte_id")) == empresa_id
+                and abs(_monto_base_abs(other) - monto_base) <= TOLERANCIA_INTERCOMPANY
             ):
                 espejo_idx = j
                 break
 
         if espejo_idx is None:
+            idx_descuadre.add(i)
             descuadres.append({
                 "tipo": "ASIMETRICO",
-                "mensaje": f"Venta de empresa {tx.get('empresa_id')} a {contraparte_id} por {monto_base} GTQ sin espejo",
+                "mensaje": f"Venta de empresa {empresa_id} a {contraparte_id} por {monto_base} GTQ sin espejo",
                 "datos": tx,
             })
             continue
 
-        # Par encontrado: eliminar ambos
-        usadas.add(i)
-        usadas.add(espejo_idx)
+        idx_pares.add(i)
+        idx_pares.add(espejo_idx)
         eliminadas.append({
-            "empresa_origen": tx.get("empresa_id"),
+            "empresa_origen": empresa_id,
             "empresa_destino": contraparte_id,
             "monto": monto_base,
             "moneda": MONEDA_BASE,
+            "id_origen": tx.get("id"),
+            "id_espejo": intercompany[espejo_idx].get("id"),
             "fila_origen": tx.get("fila_origen"),
             "fila_espejo": intercompany[espejo_idx].get("fila_origen"),
         })
 
-    # Quedan las normales + las intercompany que no se eliminaron (sin espejo)
-    intercompany_no_eliminadas = [t for idx, t in enumerate(intercompany) if idx not in usadas]
-    transacciones_limpias = normales + intercompany_no_eliminadas
+    # Se conserva todo lo que NO fue eliminado como par
+    intercompany_conservadas = [t for k, t in enumerate(intercompany) if k not in idx_pares]
+    transacciones_limpias = normales + intercompany_conservadas
 
     return {
         "transacciones_limpias": transacciones_limpias,
@@ -142,7 +172,7 @@ def calcular_indicadores_por_empresa(transacciones: list[dict]) -> dict:
     Calcula ROIC, ROCE y EVA por empresa usando las transacciones.
     Fórmulas simplificadas para el hackathon:
       - NOPAT = Ingresos (cuentas 4xxx) - Gastos (cuentas 5xxx)
-      - Capital invertido = Activos (1xxx) - Pasivos corrientes (2xxx)
+      - Capital invertido = Activos (1xxx) - Pasivos (2xxx)
       - ROIC = NOPAT / Capital invertido
       - ROCE = EBIT / Capital empleado (activos - pasivos corrientes)
       - EVA = NOPAT - (Capital invertido × WACC)
@@ -157,9 +187,12 @@ def calcular_indicadores_por_empresa(transacciones: list[dict]) -> dict:
     })
 
     for tx in transacciones:
-        emp_id = tx.get("empresa_id")
+        emp_id = _como_int(tx.get("empresa_id"))
         cuenta = str(tx.get("cuenta", ""))
-        monto = float(tx.get("monto_base", tx.get("monto", 0)) or 0)
+        monto = tx.get("monto_base")
+        if _es_nulo(monto):
+            monto = tx.get("monto", 0)
+        monto = float(monto or 0)
 
         if cuenta.startswith("4"):
             por_empresa[emp_id]["ingresos"] += monto
@@ -177,7 +210,7 @@ def calcular_indicadores_por_empresa(transacciones: list[dict]) -> dict:
         nopat = ingresos - gastos
         capital_invertido = max(datos["activos"] - datos["pasivos"], 1.0)
         ebit = nopat  # simplificación
-        capital_empleado = max(datos["activos"] - datos["pasivos"], 1.0)
+        capital_empleado = capital_invertido
 
         roic = nopat / capital_invertido if capital_invertido else 0.0
         roce = ebit / capital_empleado if capital_empleado else 0.0
