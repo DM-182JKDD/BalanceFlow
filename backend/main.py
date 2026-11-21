@@ -15,6 +15,7 @@ from schemas import (
 from routers import uploads as uploads_router
 from routers import consolidacion as consolidacion_router
 from routers import exportacion as exportacion_router
+from routers import trazabilidad as trazabilidad_router
 
 settings = get_settings()
 
@@ -39,6 +40,7 @@ app.add_middleware(
 app.include_router(uploads_router.router)
 app.include_router(consolidacion_router.router)
 app.include_router(exportacion_router.router)
+app.include_router(trazabilidad_router.router)
 
 
 # ==================== HEALTH ====================
