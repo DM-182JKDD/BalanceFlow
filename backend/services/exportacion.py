@@ -1,45 +1,26 @@
-"""
-Router de exportación: descarga el Excel del consolidado.
-"""
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import Response
-from sqlalchemy.orm import Session
+"""Generación de libros Excel para los reportes de BalanceFlow."""
+from io import BytesIO
 
-from database.connection import get_db
-from models import Transaccion
-from services.consolidacion import consolidar_grupo, ErrorConsolidacion
-from services.exportacion import generar_excel_consolidado
-
-router = APIRouter(prefix="/api/exportar", tags=["Exportación"])
+import pandas as pd
 
 
-@router.get("/excel", summary="Descargar Excel consolidado")
-def exportar_excel(db: Session = Depends(get_db)):
-    transacciones = db.query(Transaccion).all()
-    if not transacciones:
-        raise HTTPException(status_code=404, detail="No hay transacciones para exportar.")
+def generar_excel_consolidado(reporte: dict) -> bytes:
+    """Construye un libro con indicadores, empresas y eliminaciones internas."""
+    consolidado = reporte.get("consolidado", {})
+    empresas = reporte.get("por_empresa", [])
+    intercompany = reporte.get("intercompany", {})
+    movimientos = reporte.get("transacciones_limpias", [])
 
-    datos = [
-        {
-            "id": t.id, "empresa_id": t.empresa_id, "fecha": str(t.fecha),
-            "cuenta": t.cuenta, "descripcion": t.descripcion,
-            "monto": t.monto, "moneda": t.moneda, "monto_base": t.monto_base,
-            "es_intercompany": t.es_intercompany,
-            "empresa_contraparte_id": t.empresa_contraparte_id,
-            "fila_origen": t.fila_origen,
-        }
-        for t in transacciones
-    ]
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        pd.DataFrame([consolidado]).to_excel(writer, sheet_name="Consolidado", index=False)
+        pd.DataFrame(empresas).to_excel(writer, sheet_name="Por empresa", index=False)
+        pd.DataFrame(intercompany.get("eliminadas", [])).to_excel(
+            writer, sheet_name="Eliminaciones", index=False
+        )
+        pd.DataFrame(intercompany.get("descuadres", [])).to_excel(
+            writer, sheet_name="Descuadres", index=False
+        )
+        pd.DataFrame(movimientos).to_excel(writer, sheet_name="Movimientos", index=False)
 
-    try:
-        reporte = consolidar_grupo(datos)
-    except ErrorConsolidacion as e:
-        raise HTTPException(status_code=422, detail=str(e))
-
-    excel_bytes = generar_excel_consolidado(reporte)
-
-    return Response(
-        content=excel_bytes,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=Balance_Consolidado_BalanceFlow.xlsx"},
-    )
+    return buffer.getvalue()
