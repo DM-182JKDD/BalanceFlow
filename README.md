@@ -47,7 +47,7 @@ Un grupo con varias empresas ya presupuesta bien cada área por separado. Lo que
 | Validación | Pydantic |
 | Persistencia | SQLAlchemy + SQLite (desarrollo); PostgreSQL previsto para producción |
 | Procesamiento | Pandas, OpenPyXL |
-| Frontend (equipo) | React, TypeScript, Tailwind CSS |
+| Frontend | React, Vite y CSS propio |
 
 ---
 
@@ -58,8 +58,8 @@ BalanceFlow/
 ├── backend/
 │   ├── main.py                  # App FastAPI, CORS, routers y CRUD base
 │   ├── seed.py                  # Datos de prueba (6 empresas, errores sembrados)
-│   ├── models.py                # Modelos: Empresa, Sucursal, Transaccion
-│   ├── schemas.py               # Esquemas Pydantic
+│   ├── models/                  # Empresa, Sucursal, Transaccion
+│   ├── schemas/                 # Esquemas Pydantic
 │   ├── core/
 │   │   └── config.py            # Configuración (variables de entorno)
 │   ├── database/
@@ -177,7 +177,10 @@ uvicorn main:app --reload
 | GET/POST | `/api/transacciones` | Listar (filtros `empresa_id`, `sucursal_id`) / crear |
 | GET | `/api/consolidacion/resumen` | Consolidado del grupo, por empresa e intercompany |
 | GET | `/api/trazabilidad/{componente}` | Drill-down. `componente`: `ingresos`, `gastos`, `activos`, `pasivos`. Filtro opcional `empresa_id` |
+| GET | `/api/exportar/excel` | Descarga Excel del consolidado |
 | GET | `/api/exportacion/csv` | Descarga CSV del consolidado limpio |
+| GET | `/api/validacion` | Aduana sobre las transacciones guardadas |
+| PATCH | `/api/transacciones/{id}` | Actualizar una transacción |
 
 ### Ejemplos
 
