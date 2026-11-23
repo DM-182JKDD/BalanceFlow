@@ -5,6 +5,7 @@ y calcula indicadores financieros (ROIC, ROCE, EVA).
 import math
 from collections import defaultdict
 from datetime import date, datetime
+from decimal import Decimal, ROUND_HALF_UP
 
 import pandas as pd
 
@@ -73,16 +74,31 @@ def _como_int(v):
 
 # ==================== CONVERSIÓN DE MONEDAS ====================
 
-def convertir_a_moneda_base(monto: float, moneda: str) -> float:
-    """
-    Convierte un monto a GTQ (moneda base del grupo).
-    Si la moneda es inválida, devuelve 0.0 y NO rompe la consolidación
-    (la aduana ya la marcó como error en el paso de validación).
-    """
-    moneda = str(moneda).upper().strip()
-    if moneda not in TASAS_CAMBIO:
+def dinero(valor) -> float:
+    """Redondea un importe a centavos con decimal, no con float binario."""
+    try:
+        numero = Decimal(str(0 if valor is None else valor))
+    except Exception:
         return 0.0
-    return round(float(monto) * TASAS_CAMBIO[moneda], 2)
+    if not numero.is_finite():
+        return 0.0
+    return float(numero.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def convertir_a_moneda_base(monto: float, moneda: str, tasas: dict | None = None, moneda_destino: str | None = None) -> float:
+    """
+    Convierte un monto a la moneda de consolidación usando tasas expresadas en GTQ por unidad.
+    Una moneda desconocida devuelve 0 y no detiene el consolidado.
+    """
+    tabla = tasas or TASAS_CAMBIO
+    destino = str(moneda_destino or MONEDA_BASE).upper().strip()
+    origen = str(moneda or destino).upper().strip()
+    tasa_origen = tabla.get(origen)
+    tasa_destino = tabla.get(destino)
+    if tasa_origen is None or not tasa_destino:
+        return 0.0
+    convertido = Decimal(str(monto or 0)) * Decimal(str(tasa_origen)) / Decimal(str(tasa_destino))
+    return dinero(convertido)
 
 
 def convertir_dataframe(df: pd.DataFrame, columna_monto: str = "monto", columna_moneda: str = "moneda") -> pd.DataFrame:
@@ -193,7 +209,29 @@ def eliminar_intercompany(transacciones: list[dict]) -> dict:
 
 # ==================== INDICADORES FINANCIEROS ====================
 
-def calcular_indicadores_por_empresa(transacciones: list[dict]) -> dict:
+def consolidado_vacio(moneda_base: str = MONEDA_BASE) -> dict:
+    return {
+        "consolidado": {
+            "moneda_base": moneda_base,
+            "empresas_incluidas": [],
+            "total_ingresos": 0.0,
+            "total_gastos": 0.0,
+            "total_nopat": 0.0,
+            "total_capital_invertido": 0.0,
+            "roic_grupo": 0.0,
+            "eva_grupo": 0.0,
+        },
+        "por_empresa": [],
+        "intercompany": {
+            "eliminadas": [],
+            "descuadres": [],
+            "resumen": {"total_original": 0, "total_limpio": 0, "eliminadas": 0, "descuadres": 0},
+        },
+        "transacciones_limpias": [],
+    }
+
+
+def calcular_indicadores_por_empresa(transacciones: list[dict], wacc: float = 0.10) -> dict:
     """
     Calcula ROIC, ROCE y EVA por empresa usando las transacciones.
     Fórmulas simplificadas para el hackathon:
@@ -203,7 +241,7 @@ def calcular_indicadores_por_empresa(transacciones: list[dict]) -> dict:
       - ROCE = EBIT / Capital empleado (activos - pasivos corrientes)
       - EVA = NOPAT - (Capital invertido × WACC)
     """
-    WACC = 0.10  # 10% costo de capital (ficticio para el hackathon)
+    WACC = float(wacc)
 
     por_empresa: dict[int, dict] = defaultdict(lambda: {
         "ingresos": 0.0,
@@ -257,7 +295,7 @@ def calcular_indicadores_por_empresa(transacciones: list[dict]) -> dict:
     return resultados
 
 
-def consolidar_grupo(transacciones: list[dict]) -> dict:
+def consolidar_grupo(transacciones: list[dict], tasas: dict | None = None, moneda_base: str | None = None, wacc: float = 0.10) -> dict:
     """
     Pipeline completo de consolidación:
       1. Convertir todas las transacciones a moneda base
@@ -265,21 +303,16 @@ def consolidar_grupo(transacciones: list[dict]) -> dict:
       3. Calcular indicadores por empresa
       4. Calcular consolidado del grupo
     """
+    destino = str(moneda_base or MONEDA_BASE).upper()
     if not transacciones:
-        raise ErrorConsolidacion("No hay transacciones para consolidar.")
+        return consolidado_vacio(destino)
 
-    # 1. Completar monto_base solo donde falte. Un valor ya persistido se conserva.
+    # 1. Recalcular siempre desde el monto original y la moneda pedida.
     df = pd.DataFrame(transacciones)
-    if "monto_base" not in df.columns:
-        df["monto_base"] = None
-
-    def _resolver_base(row):
-        actual = row.get("monto_base")
-        if _es_nulo(actual):
-            return convertir_a_moneda_base(row.get("monto", 0), row.get("moneda", MONEDA_BASE))
-        return round(float(actual), 2)
-
-    df["monto_base"] = df.apply(_resolver_base, axis=1)
+    df["monto_base"] = df.apply(
+        lambda row: convertir_a_moneda_base(row.get("monto", 0), row.get("moneda", destino), tasas, destino),
+        axis=1,
+    )
     transacciones_convertidas = df.to_dict(orient="records")
 
     # 2. Eliminar intercompany
@@ -287,7 +320,7 @@ def consolidar_grupo(transacciones: list[dict]) -> dict:
     transacciones_limpias = limpieza["transacciones_limpias"]
 
     # 3. Indicadores por empresa
-    indicadores = calcular_indicadores_por_empresa(transacciones_limpias)
+    indicadores = calcular_indicadores_por_empresa(transacciones_limpias, wacc)
 
     # 4. Consolidado del grupo
     total_ingresos = sum(i["ingresos"] for i in indicadores.values())
@@ -297,7 +330,7 @@ def consolidar_grupo(transacciones: list[dict]) -> dict:
     total_eva = sum(i["eva"] for i in indicadores.values())
 
     consolidado = {
-        "moneda_base": MONEDA_BASE,
+        "moneda_base": destino,
         "empresas_incluidas": list(indicadores.keys()),
         "total_ingresos": round(total_ingresos, 2),
         "total_gastos": round(total_gastos, 2),

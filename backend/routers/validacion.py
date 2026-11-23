@@ -1,7 +1,8 @@
 """Aduana financiera sobre las transacciones ya persistidas."""
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
+from core.acceso import transacciones_visibles
 from database.connection import get_db
 from models import Transaccion
 from services.validacion import validar_transacciones
@@ -20,8 +21,8 @@ def _serializar(tx: Transaccion) -> dict:
 
 
 @router.get("", summary="Auditar transacciones cargadas")
-def auditar(empresa_id: int | None = None, db: Session = Depends(get_db)):
-    consulta = db.query(Transaccion)
+def auditar(request: Request, empresa_id: int | None = None, db: Session = Depends(get_db)):
+    consulta = transacciones_visibles(db, request)
     if empresa_id is not None:
         consulta = consulta.filter(Transaccion.empresa_id == empresa_id)
     return validar_transacciones([_serializar(tx) for tx in consulta.all()])

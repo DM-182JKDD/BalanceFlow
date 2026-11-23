@@ -2,19 +2,23 @@
 import csv
 import io
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from core.acceso import grupo_id, transacciones_visibles
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from database.connection import get_db
 from models import Transaccion
-from services.consolidacion import ErrorConsolidacion, consolidar_grupo
+from services.consolidacion import consolidado_vacio, consolidar_grupo
 from services.exportacion import generar_excel_consolidado
+from services.parametros import contexto
 
 router = APIRouter(prefix="/api", tags=["Exportación"])
 
 
-def _filas(db: Session) -> list[dict]:
+def _filas(db: Session, request: Request) -> list[dict]:
+    consulta = transacciones_visibles(db, request)
     return [
         {
             "id": t.id,
@@ -33,22 +37,20 @@ def _filas(db: Session) -> list[dict]:
             "archivo_origen": t.archivo_origen,
             "fila_origen": t.fila_origen,
         }
-        for t in db.query(Transaccion).all()
+        for t in consulta.all()
     ]
 
 
-def _consolidar_o_error(datos: list[dict]) -> dict:
+def _consolidar_o_error(datos: list[dict], db: Session, request: Request) -> dict:
+    tasas, moneda, wacc = contexto(db, grupo_id(request))
     if not datos:
-        raise HTTPException(status_code=404, detail="No hay transacciones para exportar.")
-    try:
-        return consolidar_grupo(datos)
-    except ErrorConsolidacion as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return consolidado_vacio(moneda)
+    return consolidar_grupo(datos, tasas, moneda, wacc)
 
 
 @router.get("/exportar/excel", summary="Descargar Excel consolidado")
-def exportar_excel(db: Session = Depends(get_db)):
-    reporte = _consolidar_o_error(_filas(db))
+def exportar_excel(request: Request, db: Session = Depends(get_db)):
+    reporte = _consolidar_o_error(_filas(db, request), db, request)
     return Response(
         content=generar_excel_consolidado(reporte),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -57,8 +59,8 @@ def exportar_excel(db: Session = Depends(get_db)):
 
 
 @router.get("/exportacion/csv", summary="Descargar CSV de transacciones limpias")
-def exportar_csv(db: Session = Depends(get_db)):
-    reporte = _consolidar_o_error(_filas(db))
+def exportar_csv(request: Request, db: Session = Depends(get_db)):
+    reporte = _consolidar_o_error(_filas(db, request), db, request)
     limpias = reporte["transacciones_limpias"]
     buffer = io.StringIO()
     if limpias:

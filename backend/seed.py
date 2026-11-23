@@ -6,7 +6,7 @@ import random
 from datetime import date, timedelta
 
 from database.connection import SessionLocal, engine, Base
-from models import Empresa, Sucursal, Transaccion
+from models import Empresa, EventoAuditoria, Grupo, Sucursal, Transaccion, Usuario
 from services.consolidacion import TASAS_CAMBIO
 
 
@@ -210,17 +210,28 @@ def seed():
     db = SessionLocal()
     try:
         # Limpiar datos previos
-        print("Limpiando transacciones previas...")
-        db.query(Transaccion).delete()
-        db.query(Sucursal).delete()
-        db.query(Empresa).delete()
-        db.commit()
+        print("Limpiando el grupo de demostración...")
+        grupo = db.query(Grupo).filter(Grupo.nombre == "Demostración").first()
+        if grupo is None:
+            grupo = Grupo(nombre="Demostración")
+            db.add(grupo)
+            db.commit()
+            db.refresh(grupo)
+        empresas_demo = db.query(Empresa.id).filter(Empresa.grupo_id == grupo.id).all()
+        ids = [fila[0] for fila in empresas_demo]
+        if ids:
+            db.query(EventoAuditoria).filter(EventoAuditoria.empresa_id.in_(ids)).delete(synchronize_session=False)
+            db.query(Usuario).filter(Usuario.empresa_id.in_(ids)).delete(synchronize_session=False)
+            db.query(Transaccion).filter(Transaccion.empresa_id.in_(ids)).delete(synchronize_session=False)
+            db.query(Sucursal).filter(Sucursal.empresa_id.in_(ids)).delete(synchronize_session=False)
+            db.query(Empresa).filter(Empresa.id.in_(ids)).delete(synchronize_session=False)
+            db.commit()
 
         # 1. Empresas
         print("Creando 6 empresas...")
         empresas = []
         for data in EMPRESAS:
-            emp = Empresa(**data)
+            emp = Empresa(**data, grupo_id=grupo.id)
             db.add(emp)
             empresas.append(emp)
         db.commit()

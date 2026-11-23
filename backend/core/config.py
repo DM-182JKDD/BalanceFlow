@@ -11,11 +11,12 @@ class Settings(BaseSettings):
     # Base de datos (SQLite por ahora; cambiar a PostgreSQL en producción)
     DATABASE_URL: str = "sqlite:///./balanceflow.db"
 
-    # Reservado para una autenticación futura. No hay endpoints que lo usen.
-    # Definirlo por entorno antes de activar JWT; este valor no firma tokens.
+    # Firma los tokens de sesión. Definirlo por entorno antes de exponer la API.
     SECRET_KEY: str = "definir-por-entorno"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    ADMIN_EMAIL: str = "admin@balanceflow.local"
+    ADMIN_PASSWORD: str = ""
 
     # Orígenes del frontend. Lista separada por comas en la variable de entorno.
     ALLOWED_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"

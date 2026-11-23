@@ -1,101 +1,82 @@
-import streamlit as st
-import pandas as pd
 import requests
-import plotly.express as px
+import pandas as pd
+import streamlit as st
 
-# Configuración de la página
-st.set_page_config(
-    page_title="BalanceFlow | Consolidación Multiempresa",
-    page_icon="📊",
-    layout="wide"
-)
+st.set_page_config(page_title="BalanceFlow | Consolidación", page_icon="📊", layout="wide")
 
 API_URL = "http://127.0.0.1:8000"
 
-# Encabezado Principal
-st.title(" BalanceFlow — Puente de Consolidación Financiera")
-st.markdown("Normalización automática, **Aduana Financiera** y consolidación multiempresa sin cambiar tu ERP.")
-st.divider()
+st.title("BalanceFlow — Consolidación")
+st.caption("Este panel usa las mismas rutas que la aplicación React.")
 
-# --- BARRA LATERAL: INGESTA DE DATOS POR SUCURSAL ---
+if "token" not in st.session_state:
+    st.session_state.token = ""
+
 with st.sidebar:
-    st.header(" 1. Ingesta por Sucursal")
-    empresa_id = st.selectbox(
-        "Selecciona Empresa / Filial:",
-        options=[1, 2, 3],
-        format_func=lambda x: {
-            1: "1 - Nexus Guatemala (Casa Matriz)",
-            2: "2 - Nexus El Salvador (Filial)",
-            3: "3 - Logística Centroamérica"
-        }[x]
-    )
-    
-    archivo = st.file_uploader("Sube reporte Excel o CSV", type=["csv", "xlsx", "xls"])
-    
-    if st.button(" Procesar y Enviar a Aduana", use_container_width=True):
-        if archivo is not None:
-            with st.spinner("Normalizando columnas con Pandas..."):
-                files = {"file": (archivo.name, archivo.getvalue())}
-                try:
-                    res = requests.post(f"{API_URL}/api/empresas/{empresa_id}/upload", files=files)
-                    if res.status_code == 200:
-                        data = res.json()
-                        st.success(f" {data['registros_importados']} registros importados.")
-                        # Ejecutar Aduana Financiera automáticamente tras la carga
-                        res_aud = requests.post(f"{API_URL}/api/empresas/{empresa_id}/auditar")
-                        if res_aud.status_code == 200:
-                            aud = res_aud.json()["auditoria"]
-                            st.info(f" Aduana: {aud['validados']} válidos | {aud['en_cuarentena']} en cuarentena.")
-                    else:
-                        st.error(f"Error: {res.json().get('detail', 'Fallo en la carga')}")
-                except Exception as e:
-                    st.error("No se pudo conectar al backend. ¿Está encendido uvicorn?")
-        else:
-            st.warning("Por favor selecciona un archivo primero.")
+    st.header("Sesión")
+    email = st.text_input("Correo", value="admin@balanceflow.local")
+    password = st.text_input("Contraseña", type="password")
+    if st.button("Entrar", use_container_width=True):
+        try:
+            respuesta = requests.post(
+                f"{API_URL}/api/auth/login",
+                json={"email": email, "password": password},
+                timeout=15,
+            )
+            if respuesta.status_code == 200:
+                st.session_state.token = respuesta.json()["access_token"]
+                st.success("Sesión iniciada")
+            else:
+                st.error(respuesta.json().get("detail", "No se pudo entrar"))
+        except requests.RequestException:
+            st.error("El backend no responde en http://127.0.0.1:8000")
 
-# --- CUERPO PRINCIPAL: CONSOLIDACIÓN Y KPIs ---
-st.header(" 2. Radiografía Financiera Consolidada")
+token = st.session_state.token
+if not token:
+    st.info("Inicia sesión para ver el consolidado.")
+    st.stop()
 
-if st.button(" Actualizar Consolidación del Grupo"):
-    st.rerun()
+headers = {"Authorization": f"Bearer {token}"}
 
 try:
-    response = requests.get(f"{API_URL}/api/consolidado")
-    if response.status_code == 200:
-        reporte = response.json()["reporte_consolidado"]
-        
-        # Métricas principales (KPIs)
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Ingresos / Activos Brutos", f"Q {reporte['volumen_bruto_total']:,.2f}")
-        col2.metric("Gastos Operativos", f"Q {reporte['gastos_totales']:,.2f}")
-        col3.metric("Eliminación Intercompany", f"- Q {reporte['intercompany_eliminado']:,.2f}", delta="Cruce limpio", delta_color="normal")
-        col4.metric("Resultado Neto Consolidado", f"Q {reporte['resultado_financiero_neto']:,.2f}")
-        
-        st.divider()
-        
-        # Gráfico de desglose por sucursal
-        desglose = reporte.get("desglose_por_empresa", {})
-        if desglose:
-            st.subheader(" Desempeño por Empresa / Filial")
-            df_chart = pd.DataFrame([
-                {
-                    "Empresa": f"Filial {emp_id}",
-                    "Ingresos": datos["ingresos_o_saldo"],
-                    "Gastos": datos["gastos"]
-                }
-                for emp_id, datos in desglose.items()
-            ])
-            
-            fig = px.bar(
-                df_chart, 
-                x="Empresa", 
-                y=["Ingresos", "Gastos"], 
-                barmode="group",
-                color_discrete_sequence=["#00CC96", "#EF553B"]
-            )
-            st.plotly_chart(fig, use_container_width=True)
+    empresas = requests.get(f"{API_URL}/api/empresas", headers=headers, timeout=15).json()
+    resumen = requests.get(f"{API_URL}/api/consolidacion/resumen", headers=headers, timeout=30).json()
+except requests.RequestException:
+    st.error("No se pudo leer el consolidado.")
+    st.stop()
+
+consolidado = resumen.get("consolidado", {})
+columnas = st.columns(4)
+columnas[0].metric("Ingresos", f"{consolidado.get('total_ingresos', 0):,.2f} {consolidado.get('moneda_base', 'GTQ')}")
+columnas[1].metric("Gastos", f"{consolidado.get('total_gastos', 0):,.2f}")
+columnas[2].metric("NOPAT", f"{consolidado.get('total_nopat', 0):,.2f}")
+columnas[3].metric("Pares eliminados", resumen.get("intercompany", {}).get("resumen", {}).get("eliminadas", 0))
+
+nombres = {empresa["id"]: empresa["nombre"] for empresa in empresas}
+detalle = resumen.get("por_empresa") or []
+if detalle:
+    tabla = pd.DataFrame(detalle)
+    tabla["empresa"] = tabla["empresa_id"].map(lambda valor: nombres.get(valor, f"Empresa {valor}"))
+    st.bar_chart(tabla.set_index("empresa")[["ingresos", "gastos"]])
+    st.dataframe(tabla, use_container_width=True)
+else:
+    st.info("Aún no hay transacciones consolidadas.")
+
+st.subheader("Cargar archivo")
+opciones = {empresa["nombre"]: empresa["id"] for empresa in empresas}
+if opciones:
+    nombre = st.selectbox("Empresa", list(opciones))
+    archivo = st.file_uploader("CSV o Excel", type=["csv", "xlsx", "xls"])
+    if st.button("Importar") and archivo is not None:
+        respuesta = requests.post(
+            f"{API_URL}/api/uploads/excel",
+            headers=headers,
+            files={"archivo": (archivo.name, archivo.getvalue())},
+            data={"empresa_id": opciones[nombre], "moneda_default": "GTQ"},
+            timeout=60,
+        )
+        if respuesta.ok:
+            cuerpo = respuesta.json()
+            st.success(f"{cuerpo.get('transacciones_insertadas', 0)} registros importados. En cuarentena: {cuerpo.get('filas_en_cuarentena', 0)}.")
         else:
-            st.info("Aún no hay transacciones consolidadas. Sube un archivo CSV/Excel desde el panel izquierdo.")
-            
-except Exception:
-    st.warning(" Esperando conexión con el backend (`http://127.0.0.1:8000`).")
+            st.error(respuesta.json().get("detail", "La carga falló"))

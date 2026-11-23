@@ -186,6 +186,10 @@ def normalizar_dataframe(
         )
     else:
         resultado["empresa_contraparte_id"] = None
+    resultado["sucursal_nombre"] = (
+        df[columnas["sucursal"]].astype(str).str.strip()
+        if "sucursal" in columnas else None
+    )
     resultado["archivo_origen"] = os.path.basename(archivo_origen)
     resultado["fila_origen"] = range(2, len(resultado) + 2)  # fila 1 = cabecera
 
