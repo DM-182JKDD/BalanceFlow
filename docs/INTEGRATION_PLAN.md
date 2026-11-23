@@ -27,18 +27,17 @@ El frontend ya llamaba empresas, sucursales, transacciones, `POST /api/uploads/e
 1. Dejar el backend importable y con los dos formatos de exportación.
 2. Completar el contrato que el modal ya usaba (`PATCH`, referencias y `monto_base`).
 3. Exponer validación y trazabilidad, que ya tenían servicio.
-4. Ajustar la interfaz a esas respuestas, sin vistas nuevas de autenticación.
-5. Cubrir con pruebas el consolidado, la aduana y el CRUD que usa la interfaz.
+4. Ajustar la interfaz a esas respuestas.
+5. Cubrir con pruebas el consolidado, la aduana, el acceso y el CRUD que usa la interfaz.
+6. Completar sesión, cuarentena, sucursal en la carga, paginación, moneda configurable, desviaciones, soporte y la barra móvil.
 
 ## Pendiente, a propósito
 
-- Autenticación y roles. La hoja de ruta del proyecto los menciona y no hay flujo de acceso en la interfaz. Agregar uno sería una función nueva, no una conexión.
-- Cuarentena que rechace filas inválidas antes de insertarlas. Hoy se insertan y se informan.
-- Asociar la sucursal detectada en un archivo con `sucursal_id`.
-- Paginación en servidor más allá de `limit`.
-- Reescribir el dashboard Streamlit. Sus rutas no existen y no es el cliente integrado.
-- PostgreSQL y migraciones.
+- Migraciones con Alembic. La prueba local ya usa PostgreSQL; las pruebas automáticas siguen en SQLite.
 - Tasas oficiales por periodo.
+- Límite de peticiones.
+
+La configuración del administrador ya crea usuarios (`POST /api/auth/usuarios`) y cada movimiento tiene `GET /api/transacciones/{id}/auditoria`.
 
 ## Cómo ejecutarlo
 

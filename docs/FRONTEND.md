@@ -22,20 +22,27 @@ Todo el producto visual está en `frontend/src/App.jsx`. No hay router de rutas:
 | Clave | Vista | Qué hace |
 |---|---|---|
 | `dashboard` | Resumen | KPIs, gráfica por rango, ingresos por empresa y salud del grupo |
-| `transactions` | Transacciones | Búsqueda local, filtro por empresa y tipo, alta, edición y baja |
-| `consolidation` | Consolidación | Indicadores, descuadres, aduana y trazabilidad |
+| `transactions` | Transacciones | Búsqueda, filtro y páginas en el servidor, alta, edición, baja y rastro de auditoría |
+| `consolidation` | Consolidación | Indicadores, descuadres, desviaciones, aduana y trazabilidad completa |
 | `companies` | Empresas | Alta, edición y baja |
 | `branches` | Sucursales | Alta, edición y baja |
 | `uploads` | Importar | CSV/XLSX/XLS hacia una empresa |
 | `reports` | Reportes | Descarga del Excel y conteos ya cargados |
+| `settings` | Configuración | Nombre del espacio, moneda, tasas y alta de usuarios. Solo administrador |
 
 `load()` pide en paralelo:
 
 - `GET /api/empresas`
 - `GET /api/sucursales`
-- `GET /api/transacciones?limit=500`
-- `GET /api/consolidacion/resumen`
+- `GET /api/transacciones?limit=8&orden=fecha&direccion=desc`
+- `GET /api/consolidacion/resumen?moneda_base=`
 - `GET /api/validacion`
+- `GET /api/configuracion`
+- `GET /api/consolidacion/serie`
+- `GET /api/consolidacion/desviaciones?dias=30`
+- `GET /api/transacciones/conteo`
+
+La vista de transacciones pide su propia página (`limit=50`) con `q`, empresa e intercompany.
 
 Si empresas falla, la barra superior muestra desconexión. El resto de fallos deja esa sección vacía. Un aviso fijo desaparece a los 3,5 segundos.
 
@@ -49,14 +56,10 @@ El modal envía JSON con `POST` o `PATCH`:
 
 La carga de archivos usa `FormData` con `archivo`, `empresa_id` y `moneda_default`.
 
-La gráfica de "Últimos 30 días" limita los movimientos a esa ventana. "Últimos 6 meses" agrupa seis meses. Los filtros de transacciones se aplican sobre los datos ya recibidos. La búsqueda también es local.
+La gráfica pide `serie` con ventana de 30 o 180 días. Los filtros de transacciones se envían al servidor. La búsqueda también.
 
-Los montos de la tabla usan la moneda original del movimiento. Los indicadores del consolidado se muestran en GTQ, que es lo que devuelve la API.
+Los montos de la tabla usan la moneda original del movimiento. Los indicadores usan la moneda base elegida. Un administrador que cambia el selector guarda esa moneda con `PATCH /api/configuracion`.
 
-## Lo que la interfaz no hace
+Sin sesión, la interfaz muestra entrar o crear cuenta. El perfil muestra el nombre y el rol, y permite cerrar sesión. "Contactar soporte" envía `POST /api/soporte`. En Transacciones y en el drill-down, **Rastrear** abre `GET /api/transacciones/{id}/auditoria`.
 
-- No hay inicio de sesión. El perfil "Equipo financiero / Administrador" es texto fijo.
-- "Contactar soporte" solo muestra un aviso con un correo; no envía un mensaje.
-- El selector de moneda del resumen no cambia la moneda base.
-- No hay paginación: se piden como máximo 500 transacciones.
-- El prototipo Streamlit de `backend/dashboard/app.py` no es esta interfaz.
+En pantallas angostas el menú lateral se oculta detrás de un botón y la barra inferior se desplaza para incluir Configuración cuando el rol la ve. Hay enlace para saltar al contenido, la sección activa se marca con `aria-current` y los diálogos anuncian su título. El prototipo Streamlit de `backend/dashboard/app.py` no es esta interfaz.
