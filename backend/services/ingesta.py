@@ -176,11 +176,16 @@ def normalizar_dataframe(
     resultado["es_intercompany"] = (
         df[columnas["es_intercompany"]]
         .astype(str).str.strip().str.upper()
-        .replace({"TRUE": "S", "FALSE": "N", "1": "S", "0": "N"})
+        .replace({"TRUE": "S", "FALSE": "N", "1": "S", "0": "N", "SI": "S", "NO": "N"})
         .where(lambda s: s.isin(["S", "N"]), "N")
         if "es_intercompany" in columnas else "N"
     )
-    resultado["empresa_contraparte_id"] = None
+    if "empresa_contraparte" in columnas:
+        resultado["empresa_contraparte_id"] = pd.to_numeric(
+            df[columnas["empresa_contraparte"]], errors="coerce"
+        )
+    else:
+        resultado["empresa_contraparte_id"] = None
     resultado["archivo_origen"] = os.path.basename(archivo_origen)
     resultado["fila_origen"] = range(2, len(resultado) + 2)  # fila 1 = cabecera
 

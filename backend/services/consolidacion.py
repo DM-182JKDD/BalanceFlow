@@ -2,7 +2,9 @@
 Servicio de consolidación: convierte monedas, elimina intercompany
 y calcula indicadores financieros (ROIC, ROCE, EVA).
 """
+import math
 from collections import defaultdict
+from datetime import date, datetime
 
 import pandas as pd
 
@@ -33,6 +35,30 @@ class ErrorConsolidacion(Exception):
 def _es_nulo(v) -> bool:
     """True para None y NaN (pandas convierte None en NaN)."""
     return v is None or (isinstance(v, float) and v != v)
+
+
+def _jsonable(value):
+    """Convierte NaN y fechas de pandas a valores que JSON puede emitir."""
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        return None
+    if hasattr(value, "item") and type(value).__module__ == "numpy":
+        return _jsonable(value.item())
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return value
 
 
 def _como_int(v):
@@ -242,11 +268,18 @@ def consolidar_grupo(transacciones: list[dict]) -> dict:
     if not transacciones:
         raise ErrorConsolidacion("No hay transacciones para consolidar.")
 
-    # 1. Convertir a moneda base
+    # 1. Completar monto_base solo donde falte. Un valor ya persistido se conserva.
     df = pd.DataFrame(transacciones)
-    if "monto_base" not in df.columns or df["monto_base"].isna().all():
-        df = convertir_dataframe(df, "monto", "moneda")
+    if "monto_base" not in df.columns:
+        df["monto_base"] = None
 
+    def _resolver_base(row):
+        actual = row.get("monto_base")
+        if _es_nulo(actual):
+            return convertir_a_moneda_base(row.get("monto", 0), row.get("moneda", MONEDA_BASE))
+        return round(float(actual), 2)
+
+    df["monto_base"] = df.apply(_resolver_base, axis=1)
     transacciones_convertidas = df.to_dict(orient="records")
 
     # 2. Eliminar intercompany
@@ -274,7 +307,7 @@ def consolidar_grupo(transacciones: list[dict]) -> dict:
         "eva_grupo": round(total_eva, 2),
     }
 
-    return {
+    return _jsonable({
         "consolidado": consolidado,
         "por_empresa": list(indicadores.values()),
         "intercompany": {
@@ -283,7 +316,7 @@ def consolidar_grupo(transacciones: list[dict]) -> dict:
             "resumen": limpieza["resumen"],
         },
         "transacciones_limpias": transacciones_limpias,
-    }
+    })
 
 
 # ==================== EXPLICADOR DE DESVIACIONES ====================

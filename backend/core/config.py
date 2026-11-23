@@ -6,18 +6,23 @@ class Settings(BaseSettings):
     # App
     APP_NAME: str = "BalanceFlow API"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = True
+    DEBUG: bool = False
 
     # Base de datos (SQLite por ahora; cambiar a PostgreSQL en producción)
     DATABASE_URL: str = "sqlite:///./balanceflow.db"
 
-    # JWT / Seguridad (cambiar SECRET_KEY en producción)
-    SECRET_KEY: str = "balanceflow-hackathon-2026-cambia-esto"
+    # Reservado para una autenticación futura. No hay endpoints que lo usen.
+    # Definirlo por entorno antes de activar JWT; este valor no firma tokens.
+    SECRET_KEY: str = "definir-por-entorno"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
-    # CORS
-    ALLOWED_ORIGINS: list[str] = ["*"]
+    # Orígenes del frontend. Lista separada por comas en la variable de entorno.
+    ALLOWED_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [origen.strip() for origen in self.ALLOWED_ORIGINS.split(",") if origen.strip()]
 
     class Config:
         env_file = ".env"

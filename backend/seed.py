@@ -7,6 +7,7 @@ from datetime import date, timedelta
 
 from database.connection import SessionLocal, engine, Base
 from models import Empresa, Sucursal, Transaccion
+from services.consolidacion import TASAS_CAMBIO
 
 
 # ==================== DATOS BASE ====================
@@ -106,6 +107,11 @@ def _crear_transacciones_operativas(empresa_id: int, moneda: str, sucursal_id: i
     return txs
 
 
+def _monto_en(monto: float, moneda_origen: str, moneda_destino: str) -> float:
+    """Convierte un importe para que el par intercompany cuadre en moneda base."""
+    return round(float(monto) * TASAS_CAMBIO[moneda_origen] / TASAS_CAMBIO[moneda_destino], 2)
+
+
 def _crear_transacciones_intercompany(empresas: list[Empresa]) -> list[dict]:
     """Crea pares intercompany (venta interna + espejo)."""
     txs = []
@@ -126,12 +132,14 @@ def _crear_transacciones_intercompany(empresas: list[Empresa]) -> list[dict]:
             "banco": "BI", "categoria": "Ventas",
             "es_intercompany": "S", "empresa_contraparte_id": dest.id,
         })
-        # Espejo (empresa destino registra la compra)
+        # Espejo (empresa destino registra la compra) en su moneda local,
+        # con el mismo valor absoluto en GTQ que la venta de origen.
         txs.append({
             "empresa_id": dest.id, "sucursal_id": None,
             "fecha": _fecha_aleatoria(), "cuenta": "5100",
             "descripcion": f"Compra intercompany de {orig.nombre}",
-            "monto": -monto, "moneda": dest.moneda_local,
+            "monto": -_monto_en(monto, orig.moneda_local, dest.moneda_local),
+            "moneda": dest.moneda_local,
             "banco": "BI", "categoria": "Compras",
             "es_intercompany": "S", "empresa_contraparte_id": orig.id,
         })
