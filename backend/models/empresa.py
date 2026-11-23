@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, func
+from sqlalchemy import Column, ForeignKey, Integer, String, Boolean, DateTime, func
 from sqlalchemy.orm import relationship
 from database.connection import Base
 
@@ -7,6 +7,7 @@ class Empresa(Base):
     __tablename__ = "empresas"
 
     id = Column(Integer, primary_key=True, index=True)
+    grupo_id = Column(Integer, ForeignKey("grupos.id"), nullable=True, index=True)
     nombre = Column(String(120), nullable=False)
     pais = Column(String(60), nullable=False)
     moneda_local = Column(String(3), nullable=False)  # GTQ, USD, EUR, MXN

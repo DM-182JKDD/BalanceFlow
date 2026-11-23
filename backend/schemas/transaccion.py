@@ -23,6 +23,20 @@ class TransaccionCreate(TransaccionBase):
     pass
 
 
+class TransaccionUpdate(BaseModel):
+    empresa_id: int | None = Field(None, gt=0)
+    sucursal_id: int | None = Field(None, gt=0)
+    fecha: date | None = None
+    cuenta: str | None = Field(None, min_length=1, max_length=20)
+    descripcion: str | None = Field(None, max_length=255)
+    monto: float | None = None
+    moneda: str | None = Field(None, min_length=3, max_length=3)
+    banco: str | None = Field(None, max_length=80)
+    categoria: str | None = Field(None, max_length=80)
+    es_intercompany: str | None = Field(None, pattern="^[SN]$")
+    empresa_contraparte_id: int | None = None
+
+
 class TransaccionResponse(TransaccionBase):
     id: int
     creada_en: datetime

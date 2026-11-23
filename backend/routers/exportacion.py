@@ -1,29 +1,30 @@
-<<<<<<< HEAD
-"""Endpoint para descargar el Excel del consolidado."""
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import Response
+"""Descarga del consolidado en Excel y CSV."""
+import csv
+import io
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from core.acceso import grupo_id, transacciones_visibles
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from database.connection import get_db
 from models import Transaccion
-from services.consolidacion import ErrorConsolidacion, consolidar_grupo
+from services.consolidacion import consolidado_vacio, consolidar_grupo
 from services.exportacion import generar_excel_consolidado
+from services.parametros import contexto
 
-router = APIRouter(prefix="/api/exportar", tags=["Exportación"])
+router = APIRouter(prefix="/api", tags=["Exportación"])
 
 
-@router.get("/excel", summary="Descargar Excel consolidado")
-def exportar_excel(db: Session = Depends(get_db)):
-    transacciones = db.query(Transaccion).all()
-    if not transacciones:
-        raise HTTPException(status_code=404, detail="No hay transacciones para exportar.")
-
-    datos = [
+def _filas(db: Session, request: Request) -> list[dict]:
+    consulta = transacciones_visibles(db, request)
+    return [
         {
             "id": t.id,
             "empresa_id": t.empresa_id,
             "sucursal_id": t.sucursal_id,
-            "fecha": str(t.fecha),
+            "fecha": str(t.fecha) if t.fecha is not None else None,
             "cuenta": t.cuenta,
             "descripcion": t.descripcion,
             "monto": t.monto,
@@ -36,58 +37,41 @@ def exportar_excel(db: Session = Depends(get_db)):
             "archivo_origen": t.archivo_origen,
             "fila_origen": t.fila_origen,
         }
-        for t in transacciones
+        for t in consulta.all()
     ]
 
-    try:
-        reporte = consolidar_grupo(datos)
-    except ErrorConsolidacion as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+def _consolidar_o_error(datos: list[dict], db: Session, request: Request) -> dict:
+    tasas, moneda, wacc = contexto(db, grupo_id(request))
+    if not datos:
+        return consolidado_vacio(moneda)
+    return consolidar_grupo(datos, tasas, moneda, wacc)
+
+
+@router.get("/exportar/excel", summary="Descargar Excel consolidado")
+def exportar_excel(request: Request, db: Session = Depends(get_db)):
+    reporte = _consolidar_o_error(_filas(db, request), db, request)
     return Response(
         content=generar_excel_consolidado(reporte),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=Balance_Consolidado_BalanceFlow.xlsx"},
     )
-=======
-import csv
-import io
-
-from fastapi import APIRouter
-from fastapi.responses import StreamingResponse
-
-from database.connection import SessionLocal
-from models import Transaccion
-from services.consolidacion import consolidar_grupo
-
-router = APIRouter(prefix="/api/exportacion", tags=["Exportación"])
 
 
-def _filas():
-    db = SessionLocal()
-    try:
-        return [
-            {c.name: getattr(t, c.name) for c in t.__table__.columns}
-            for t in db.query(Transaccion).all()
-        ]
-    finally:
-        db.close()
-
-
-@router.get("/csv")
-def exportar_csv():
-    """Exporta las transacciones limpias (post-eliminación intercompany) a CSV."""
-    r = consolidar_grupo(_filas())
-    limpias = r["transacciones_limpias"]
-    buf = io.StringIO()
+@router.get("/exportacion/csv", summary="Descargar CSV de transacciones limpias")
+def exportar_csv(request: Request, db: Session = Depends(get_db)):
+    reporte = _consolidar_o_error(_filas(db, request), db, request)
+    limpias = reporte["transacciones_limpias"]
+    buffer = io.StringIO()
     if limpias:
-        w = csv.DictWriter(buf, fieldnames=list(limpias[0].keys()))
-        w.writeheader()
-        w.writerows(limpias)
-    buf.seek(0)
+        campos = list(limpias[0].keys())
+        writer = csv.DictWriter(buffer, fieldnames=campos)
+        writer.writeheader()
+        for fila in limpias:
+            writer.writerow({k: "" if v is None else v for k, v in fila.items()})
+    buffer.seek(0)
     return StreamingResponse(
-        iter([buf.getvalue()]),
+        iter([buffer.getvalue()]),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=consolidado.csv"},
     )
->>>>>>> 9274efb6cd6060b92a1a46ed627856742652eef2

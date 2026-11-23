@@ -8,7 +8,7 @@ class Transaccion(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
-    sucursal_id = Column(Integer, ForeignKey("sucursales.id"), nullable=True, index=True)
+    sucursal_id = Column(Integer, ForeignKey("sucursales.id", ondelete="SET NULL"), nullable=True, index=True)
 
     # Datos financieros
     fecha = Column(Date, nullable=False)
